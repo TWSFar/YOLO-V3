@@ -66,7 +66,6 @@ hyp = {'giou': .035,  # giou loss gain
 def train(
         classes,
         cfg,
-        data_cfg,
         img_size=416,
         resume=False,
         epochs=100,  # 500200 batches at bs 4, 117263 images = 68 epochs
@@ -109,12 +108,18 @@ def train(
                 p.requires_grad = True if p.shape[0] == nf else False
 
         else:  # resume from latest.pt
-            chkpt = torch.load(latest, map_location=device)  # load checkpoint
-            model.load_state_dict(chkpt['model'])
+            chkpt = torch.load(best, map_location=device)  # load checkpoint
+            model_dict = model.state_dict()
+            pretrained_dict = chkpt['model']
+            new_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict.keys()}
+            # model.load_state_dict(chkpt['model'])
+            model_dict.update(new_dict)
+            model.load_state_dict(model_dict)
 
         start_epoch = chkpt['epoch'] + 1
         if chkpt['optimizer'] is not None:
-            optimizer.load_state_dict(chkpt['optimizer'])
+            temp = chkpt['optimizer']
+            # optimizer.load_state_dict(chkpt['optimizer'])
             best_loss = chkpt['best_loss']
         del chkpt
 
@@ -245,7 +250,7 @@ def train(
         # Calculate mAP (always test final epoch, skip first 5 if opt.nosave)
         if not (opt.notest or (opt.nosave and epoch < 10)) or epoch == epochs - 1:
             with torch.no_grad():
-                results, maps = test.test(opt, cfg, data_cfg, batch_size=batch_size, img_size=img_size_test, model=model,
+                results, maps = test.test(opt, cfg, batch_size=batch_size, img_size=img_size_test, model=model,
                                           conf_thres=0.1, classes=classes)
 
         # Write epoch results
@@ -298,13 +303,13 @@ def print_mutation(hyp, results):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--epochs', type=int, default=200, help='number of epochs')
+    parser.add_argument('--epochs', type=int, default=450, help='number of epochs')
     parser.add_argument('--batch-size', type=int, default=2, help='batch size')
     parser.add_argument('--accumulate', type=int, default=1, help='number of batches to accumulate before optimizing')
     parser.add_argument('--cfg', type=str, default='cfg/yolov3-spp.cfg', help='cfg file path')
-    parser.add_argument('--data-cfg', type=str, default='data/hkb.data', help='coco.data file path')
+  
     parser.add_argument('--single-scale', action='store_true', help='train at fixed size (no multi-scale)')
-    parser.add_argument('--img-size', type=int, default=416, help='inference size (pixels)')
+    parser.add_argument('--img-size', type=int, default=640, help='inference size (pixels)')
     parser.add_argument('--resume', action='store_true', help='resume training flag')
     parser.add_argument('--transfer', action='store_true', help='transfer learning flag')
     parser.add_argument('--num-workers', type=int, default=4, help='number of Pytorch DataLoader workers')
@@ -334,9 +339,9 @@ if __name__ == '__main__':
     results = train(
         classes=classes,
         cfg=opt.cfg,
-        data_cfg=opt.data_cfg,
         img_size=opt.img_size,
         resume=opt.resume or opt.transfer,
+        #resume=True,
         transfer=opt.transfer,
         epochs=opt.epochs,
         batch_size=opt.batch_size,
@@ -371,7 +376,6 @@ if __name__ == '__main__':
             # Determine mutation fitness
             results = train(
                 opt.cfg,
-                opt.data_cfg,
                 img_size=opt.img_size,
                 resume=opt.resume or opt.transfer,
                 transfer=opt.transfer,

@@ -11,7 +11,6 @@ from utils.utils import *
 def test(
         opt, 
         cfg,
-        data_cfg,
         weights=None,
         batch_size=16,
         img_size=416,
@@ -202,20 +201,26 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(prog='test.py')
     parser.add_argument('--batch-size', type=int, default=16, help='size of each image batch')
     parser.add_argument('--cfg', type=str, default='cfg/yolov3-spp.cfg', help='cfg file path')
-    parser.add_argument('--data-cfg', type=str, default='data/coco.data', help='coco.data file path')
+ 
     parser.add_argument('--weights', type=str, default='weights/yolov3-spp.weights', help='path to weights file')
     parser.add_argument('--iou-thres', type=float, default=0.5, help='iou threshold required to qualify as detected')
     parser.add_argument('--conf-thres', type=float, default=0.001, help='object confidence threshold')
     parser.add_argument('--nms-thres', type=float, default=0.5, help='iou threshold for non-maximum suppression')
     parser.add_argument('--save-json', action='store_true', help='save a cocoapi-compatible JSON results file')
     parser.add_argument('--img-size', type=int, default=416, help='inference size (pixels)')
+    parser.add_argument('--number-classes', type=int, default=1, help='number of classes')
+    parser.add_argument('--root-path', type=str, default='/home/twsf/datasets/hkb/', help='path of dataset')
+
     opt = parser.parse_args()
+    
     print(opt)
 
+    classes = ('Vehicle', )
     with torch.no_grad():
         mAP = test(
+            opt, 
             opt.cfg,
-            opt.data_cfg,
+  
             opt.weights,
             opt.batch_size,
             opt.img_size,
@@ -223,4 +228,5 @@ if __name__ == '__main__':
             opt.conf_thres,
             opt.nms_thres,
             opt.save_json
+
         )
