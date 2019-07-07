@@ -1,10 +1,10 @@
 import os
 
 import torch.nn.functional as F
-
+from torch import nn
 from utils.parse_config import *
 from utils.utils import *
-
+from se_module import SELayer
 ONNX_EXPORT = False
 
 
@@ -55,7 +55,10 @@ def create_modules(module_defs):
 
         elif module_def['type'] == 'shortcut':
             filters = output_filters[int(module_def['from'])]
-            modules.add_module('shortcut_%d' % i, EmptyLayer())
+
+            #SENet
+            selayer = SELayer(filters, 16)
+            modules.add_module('shortcut_%d' % i, selayer)
 
         elif module_def['type'] == 'yolo':
             anchor_idxs = [int(x) for x in module_def['mask'].split(',')]
@@ -201,8 +204,9 @@ class Darknet(nn.Module):
                 else:
                     x = torch.cat([layer_outputs[i] for i in layer_i], 1)
             elif mtype == 'shortcut':
+                x = module(layer_outputs[-1])
                 layer_i = int(module_def['from'])
-                x = layer_outputs[-1] + layer_outputs[layer_i]
+                x = x + layer_outputs[layer_i]
             elif mtype == 'yolo':
                 x = module[0](x, img_size)
                 output.append(x)
