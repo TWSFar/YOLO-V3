@@ -318,7 +318,7 @@ if __name__ == '__main__':
     parser.add_argument('--var', default=0, type=int, help='debug variable')
 
     parser.add_argument('--number-classes', type=int, default=1, help='number of classes')
-    parser.add_argument('--root-path', type=str, default='/home/twsf/datasets/hkb/', help='path of dataset')
+    parser.add_argument('--root-path', type=str, default='G:\\CV\\Reading\\YOLO-V3\\datasets', help='path of dataset')
 
     classes = ('Vehicle', )
 

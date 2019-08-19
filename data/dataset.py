@@ -1,3 +1,4 @@
+# -*- coding: UTF-8 -*-
 import glob
 import os
 import os.path as osp
@@ -216,8 +217,8 @@ class LoadImagesAndLabels(Dataset):  # for training
 
         nL = len(labels)
         if nL > 0:
-            # convert xyxy to xywh
-            labels = np.clip(labels, 0, self.img_size - 1)
+            # convert xyxy to xywh 
+            labels = np.clip(labels, 0, self.img_size - 1) # 这里可能存在bug, 当类的数量大于输入图像的输入大小时, 就炸了???
             labels[:, 1:5] = xyxy2xywh(labels[:, 1:5].copy())
 
             # Normalize coordinates 0 - 1

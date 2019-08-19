@@ -89,7 +89,7 @@ def test(
         # Statistics per image
         for si, pred in enumerate(output):
             labels = targets[targets[:, 0] == si, 1:] # si: i'th image
-            nl = len(labels) # number of object
+            nl = len(labels)  # number of object
             tcls = labels[:, 0].tolist() if nl else []  # target class
             seen += 1
 
