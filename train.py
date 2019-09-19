@@ -13,6 +13,13 @@ from data.dataset import *
 from utils.utils import *
 from tqdm import tqdm
 
+mixed_precision = True
+try:  # Mixed precision training https://github.com/NVIDIA/apex
+    from apex import amp
+except:
+    mixed_precision = False  # not installed
+
+
 # Hyperparameters: train.py --evolve --epochs 2 --img-size 320, Metrics: 0.204      0.302      0.175      0.234 (square smart)
 hyp = {'giou': .035,  # giou loss gain
        'xy': 0.20,  # xy loss gain
@@ -26,69 +33,33 @@ hyp = {'giou': .035,  # giou loss gain
        'momentum': 0.90,  # SGD momentum
        'weight_decay': 0.0005}  # optimizer weight decay
 
-'''
-    # Hyperparameters: Original, Metrics: 0.172      0.304      0.156      0.205 (square)
-    # hyp = {'xy': 0.5,  # xy loss gain
-    #        'wh': 0.0625,  # wh loss gain
-    #        'cls': 0.0625,  # cls loss gain
-    #        'conf': 4,  # conf loss gain
-    #        'iou_t': 0.1,  # iou target-anchor training threshold
-    #        'lr0': 0.001,  # initial learning rate
-    #        'lrf': -5.,  # final learning rate = lr0 * (10 ** lrf)
-    #        'momentum': 0.9,  # SGD momentum
-    #        'weight_decay': 0.0005}  # optimizer weight decay
 
-    # Hyperparameters: train.py --evolve --epochs 2 --img-size 320, Metrics: 0.225      0.251      0.145      0.218 (rect)
-    # hyp = {'xy': 0.4499,  # xy loss gain
-    #        'wh': 0.05121,  # wh loss gain
-    #        'cls': 0.04207,  # cls loss gain
-    #        'conf': 2.853,  # conf loss gain
-    #        'iou_t': 0.2487,  # iou target-anchor training threshold
-    #        'lr0': 0.0005301,  # initial learning rate
-    #        'lrf': -5.,  # final learning rate = lr0 * (10 ** lrf)
-    #        'momentum': 0.8823,  # SGD momentum
-    #        'weight_decay': 0.0004149}  # optimizer weight decay
-
-    # Hyperparameters: train.py --evolve --epochs 2 --img-size 320, Metrics: 0.178      0.313      0.167      0.212 (square)
-    # hyp = {'xy': 0.4664,  # xy loss gain
-    #        'wh': 0.08437,  # wh loss gain
-    #        'cls': 0.05145,  # cls loss gain
-    #        'conf': 4.244,  # conf loss gain
-    #        'iou_t': 0.09121,  # iou target-anchor training threshold
-    #        'lr0': 0.0004938,  # initial learning rate
-    #        'lrf': -5.,  # final learning rate = lr0 * (10 ** lrf)
-    #        'momentum': 0.9025,  # SGD momentum
-    #        'weight_decay': 0.0005417}  # optimizer weight decay
-'''
+classes = ('aeroplane', 'bicycle', 'bird', 'boat', 'bottle', 'bus', 'car',
+           'cat', 'chair', 'cow', 'diningtable', 'dog', 'horse',
+           'motorbike', 'person', 'pottedplant', 'sheep', 'sofa', 'train',
+           'tvmonitor')
 
 
-
-def train(
-        classes,
-        cfg,
-        data_cfg,
-        img_size=416,
-        resume=False,
-        epochs=100,  # 500200 batches at bs 4, 117263 images = 68 epochs
-        batch_size=16,
-        accumulate=4,  # effective bs = 64 = batch_size * accumulate
-        freeze_backbone=False,
-        transfer=False  # Transfer learning (train only YOLO layers)
-):
-    
-    nc = opt.number_classes
-    weights = 'weights' + os.sep
-    latest = weights + 'latest.pt'
-    best = weights + 'best.pt'
-    device = torch_utils.select_device()
-    torch.backends.cudnn.benchmark = True  # possibly unsuitable for multiscale
+def train(freeze_backbone=False, transfer=False):
+    cfg = opt.cfg
+    img_size = opt.img_size
+    epochs = opt.epochs
+    batch_size = opt.batch_size
+    accumulate = opt.accumulate
+    weights = opt.weights
+    nc = len(classes)
+   
+    latest = 'weights/latest.pt'
+    best = 'weights/best.pt'
+    device = torch_utils.select_device(apex=mixed_precision)
     img_size_test = img_size  # image size for testing
-    multi_scale = not opt.single_scale
+    multi_scale = opt.multi_scale
 
     if multi_scale:
-        img_size_min = round(img_size / 32 / 1.5)
-        img_size_max = round(img_size / 32 * 1.5)
+        img_size_min = round(img_size / 32 / 1.5) + 1
+        img_size_max = round(img_size / 32 * 1.5) - 1
         img_size = img_size_max * 32  # initiate with maximum multi_scale size
+        print('Using multi-scale %g - %g' % (img_sz_min * 32, img_size))
 
     # Initialize model
     model = Darknet(cfg, img_size).to(device)
@@ -100,7 +71,7 @@ def train(
     start_epoch = 0
     best_loss = float('inf')
     nf = int(model.module_defs[model.yolo_layers[0] - 1]['filters'])  # yolo layer size (i.e. 255)
-    if resume:  # Load previously saved model
+    if opt.resume:  # Load previously saved model
         if transfer:  # Transfer learning
             chkpt = torch.load(weights + 'yolov3-spp.pt', map_location=device)
             model.load_state_dict({k: v for k, v in chkpt['model'].items() if v.numel() > 1 and v.shape[0] != 255},
@@ -154,7 +125,6 @@ def train(
 
     # Mixed precision training https://github.com/NVIDIA/apex
     # install help: https://github.com/NVIDIA/apex/issues/259
-    mixed_precision = False
     if mixed_precision:
         from apex import amp
         model, optimizer = amp.initialize(model, optimizer, opt_level='O1')
@@ -245,7 +215,7 @@ def train(
         # Calculate mAP (always test final epoch, skip first 5 if opt.nosave)
         if not (opt.notest or (opt.nosave and epoch < 10)) or epoch == epochs - 1:
             with torch.no_grad():
-                results, maps = test.test(opt, cfg, data_cfg, batch_size=batch_size, img_size=img_size_test, model=model,
+                results, maps = test.test(opt, cfg, batch_size=batch_size, img_size=img_size_test, model=model,
                                           conf_thres=0.1, classes=classes)
 
         # Write epoch results
@@ -303,7 +273,7 @@ if __name__ == '__main__':
     parser.add_argument('--accumulate', type=int, default=1, help='number of batches to accumulate before optimizing')
     parser.add_argument('--cfg', type=str, default='cfg/yolov3-spp.cfg', help='cfg file path')
     parser.add_argument('--data-cfg', type=str, default='data/hkb.data', help='coco.data file path')
-    parser.add_argument('--single-scale', action='store_true', help='train at fixed size (no multi-scale)')
+    parser.add_argument('--multi-scale', action='store_true', help='adjust (67% - 150%) img_size every 10 batches')
     parser.add_argument('--img-size', type=int, default=416, help='inference size (pixels)')
     parser.add_argument('--resume', action='store_true', help='resume training flag')
     parser.add_argument('--transfer', action='store_true', help='transfer learning flag')
@@ -316,7 +286,7 @@ if __name__ == '__main__':
     parser.add_argument('--giou', action='store_true', help='use GIoU loss instead of xy, wh loss')
     parser.add_argument('--evolve', action='store_true', help='run hyperparameter evolution')
     parser.add_argument('--var', default=0, type=int, help='debug variable')
-
+    parser.add_argument('--weights', type=str, default='', help='initial weights')  # i.e. weights/darknet.53.conv.74
     parser.add_argument('--number-classes', type=int, default=1, help='number of classes')
     parser.add_argument('--root-path', type=str, default='G:\\CV\\Reading\\YOLO-V3\\datasets', help='path of dataset')
 
@@ -331,17 +301,7 @@ if __name__ == '__main__':
 
     init_seeds()
     # Train
-    results = train(
-        classes=classes,
-        cfg=opt.cfg,
-        data_cfg=opt.data_cfg,
-        img_size=opt.img_size,
-        resume=opt.resume or opt.transfer,
-        transfer=opt.transfer,
-        epochs=opt.epochs,
-        batch_size=opt.batch_size,
-        accumulate=opt.accumulate
-    )
+    results = train(freeze_backbone=False, transfer=False)
 
  
     # Evolve hyperparameters (optional)
@@ -370,12 +330,6 @@ if __name__ == '__main__':
 
             # Determine mutation fitness
             results = train(
-                opt.cfg,
-                opt.data_cfg,
-                img_size=opt.img_size,
-                resume=opt.resume or opt.transfer,
-                transfer=opt.transfer,
-                epochs=opt.epochs,
                 batch_size=opt.batch_size,
                 accumulate=opt.accumulate,
             )

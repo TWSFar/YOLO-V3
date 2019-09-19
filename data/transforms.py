@@ -127,6 +127,7 @@ def random_affine(img, targets=(), degrees=(-10, 10), translate=(.1, .1), scale=
 
     return imw, targets
 
+
 def random_flip(img, labels, px=0.5):
     """
     random horizontal flip
@@ -242,6 +243,7 @@ def random_color_distort(src, brightness_delta=32, contrast_low=0.5, contrast_hi
     # return np.clip(src, 0, 255).astype(np.uint8)
     return src
 
+
 def bbox_crop(labels, crop_box=None, allow_outside_center=True):
     """gluoncv code
     Crop bounding boxes according to slice area.
@@ -297,6 +299,7 @@ def bbox_crop(labels, crop_box=None, allow_outside_center=True):
     labels = labels[mask]
     labels[:, 1:] = bbox[mask]
     return labels
+
 
 def random_crop_with_constraints(bbox, size, min_scale=0.3, max_scale=1,
                                  max_aspect_ratio=2, constraints=None,

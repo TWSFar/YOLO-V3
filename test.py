@@ -11,7 +11,6 @@ from utils.utils import *
 def test(
         opt, 
         cfg,
-        data_cfg,
         weights=None,
         batch_size=16,
         img_size=416,

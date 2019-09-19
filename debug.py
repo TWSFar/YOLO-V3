@@ -1,4 +1,6 @@
 import os
 
-file = open("debug.txt", 'a')
-file.write("22??")
+
+for i in range(10):
+    a = [i for i in range(2)]
+    print(i)
