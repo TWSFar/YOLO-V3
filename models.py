@@ -1,5 +1,6 @@
 import torch.nn.functional as F
 
+from utils.google_utils import *
 from utils.parse_config import *
 from utils.utils import *
 
@@ -291,19 +292,29 @@ def create_grids(self, img_size=416, ng=(13, 13), device='cpu', type=torch.float
 def load_darknet_weights(self, weights, cutoff=-1):
     # Parses and loads the weights stored in 'weights'
     # cutoff: save layers between 0 and cutoff (if cutoff = -1 all are saved)
-    weights_file = weights.split(os.sep)[-1]
+    file = Path(weights).name
 
     # Try to download weights if not available locally
+    msg = weights + ' missing, download from https://drive.google.com/drive/folders/1uxgUBemJVw9wZsdpboYbzUN4bcRhsuAI'
     if not os.path.isfile(weights):
-        try:
-            os.system('wget https://pjreddie.com/media/files/' + weights_file + ' -O ' + weights)
-        except IOError:
-            print(weights + ' not found.\nTry https://drive.google.com/drive/folders/1uxgUBemJVw9wZsdpboYbzUN4bcRhsuAI')
+        if file == 'yolov3-spp.weights':
+            gdrive_download(id='1oPCHKsM2JpM-zgyepQciGli9X0MTsJCO', name=weights)
+        elif file == 'darknet53.conv.74':
+            gdrive_download(id='18xqvs_uwAqfTXp-LJCYLYNHBOcrwbrp0', name=weights)
+        else:
+            try:  # download from pjreddie.com
+                url = 'https://pjreddie.com/media/files/' + file
+                print('Downloading ' + url)
+                os.system('curl -f ' + url + ' -o ' + weights)
+            except IOError:
+                print(msg)
+                os.system('rm ' + weights)  # remove partial downloads
+    assert os.path.exists(weights), msg  # download missing weights from Google Drive
 
     # Establish cutoffs
-    if 'darknet53.conv.74' in weights_file:
+    if file == 'darknet53.conv.74':
         cutoff = 75
-    elif 'yolov3-tiny.conv.15' in weights_file:
+    elif file == 'yolov3-tiny.conv.15':
         cutoff = 15
 
     # Read weights file
@@ -315,10 +326,10 @@ def load_darknet_weights(self, weights, cutoff=-1):
         weights = np.fromfile(f, dtype=np.float32)  # The rest are weights
 
     ptr = 0
-    for i, (module_def, module) in enumerate(zip(self.module_defs[:cutoff], self.module_list[:cutoff])):
-        if module_def['type'] == 'convolutional':
+    for i, (mdef, module) in enumerate(zip(self.module_defs[:cutoff], self.module_list[:cutoff])):
+        if mdef['type'] == 'convolutional':
             conv_layer = module[0]
-            if module_def['batch_normalize']:
+            if mdef['batch_normalize']:
                 # Load BN bias, weights, running mean and running variance
                 bn_layer = module[1]
                 num_b = bn_layer.bias.numel()  # Number of biases
@@ -338,20 +349,18 @@ def load_darknet_weights(self, weights, cutoff=-1):
                 bn_rv = torch.from_numpy(weights[ptr:ptr + num_b]).view_as(bn_layer.running_var)
                 bn_layer.running_var.data.copy_(bn_rv)
                 ptr += num_b
-                
             else:
                 # Load conv. bias
                 num_b = conv_layer.bias.numel()
                 conv_b = torch.from_numpy(weights[ptr:ptr + num_b]).view_as(conv_layer.bias)
                 conv_layer.bias.data.copy_(conv_b)
                 ptr += num_b
-           
             # Load conv. weights
             num_w = conv_layer.weight.numel()
             conv_w = torch.from_numpy(weights[ptr:ptr + num_w]).view_as(conv_layer.weight)
             conv_layer.weight.data.copy_(conv_w)
             ptr += num_w
-          
+
     return cutoff
 
 
@@ -396,7 +405,13 @@ def convert(cfg='cfg/yolov3-spp.cfg', weights='weights/yolov3-spp.weights'):
 
     elif weights.endswith('.weights'):  # darknet format
         _ = load_darknet_weights(model, weights)
-        chkpt = {'epoch': -1, 'best_loss': None, 'model': model.state_dict(), 'optimizer': None}
+
+        chkpt = {'epoch': -1, 
+                 'best_loss': None, 
+                 'training_results':None,
+                 'model': model.state_dict(), 
+                 'optimizer': None}
+
         torch.save(chkpt, 'converted.pt')
         print("Success: converted '%s' to 'converted.pt'" % weights)
 

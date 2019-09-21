@@ -7,7 +7,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 import torch
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, DataLoader
 
 from utils.utils import xyxy2xywh
 from .transforms import *
@@ -128,23 +128,17 @@ class LoadWebcam:  # for inference
 
 
 class LoadImagesAndLabels(Dataset):  # for training
-    def __init__(
-                self, 
-                root='data', 
-                mode='train',
-                img_size=608, 
-                batch_size=8,
-                classes=[]
-                ):
-       
+    def __init__(self, root='data', img_size=608, batch_size=8, hyp=None,
+                 classes=[], mode='train'):
+
         # load image path
         self._root = root
         self._items = self._load_items(mode)
-        self._anno_path = os.path.join('{}', 'Annotations', '{}.xml')
-        self._image_path = os.path.join('{}', 'JPEGImages', '{}.jpg')
-        self.img_files = [self._image_path.format(*x) for x in self._items]
-        self.label_files = [self._anno_path.format(*x) for x in self._items]
-        
+        self._anno_path = os.path.join(root, 'Annotations', '{}.xml')
+        self._image_path = os.path.join(root, 'JPEGImages', '{}.jpg')
+        self.img_files = [self._image_path.format(x) for x in self._items]
+        self.label_files = [self._anno_path.format(x) for x in self._items]
+
         # information of train
         n = len(self.img_files)
         bi = np.floor(np.arange(n) / batch_size).astype(np.int)  # batch index
@@ -152,9 +146,9 @@ class LoadImagesAndLabels(Dataset):  # for training
         assert n > 0, 'No images found in %s' % path
         self.nF = n     # number of image files
         self.batch = bi  # batch index of image
-        self.height = img_size
         self.img_size = img_size
-        self.mode = mode 
+        self.mode = mode
+        self.hyp = hyp
 
         # classes
         self.classes = classes
@@ -170,10 +164,10 @@ class LoadImagesAndLabels(Dataset):  # for training
     def _load_items(self, mode):
         """Load individual image indices from splits."""
         ids = []
-        root = osp.join(self._root, mode) 
+        root = self._root
         lf = os.path.join(root, 'ImageSets', 'Main', mode + '.txt')
         with open(lf, 'r') as f:
-            ids += [(root, line.strip()) for line in f.readlines()]
+            ids += [line.strip() for line in f.readlines()]
         return ids
 
 
@@ -183,6 +177,7 @@ class LoadImagesAndLabels(Dataset):  # for training
         img = cv2.imread(self.img_files[index])  # BGR
         assert img is not None, 'File Not Found ' + self.img_files[index]
         h, w = img.shape[:2]
+        hyp = self.hyp
 
         labels = self._load_pascal_annotation(self.label_files[index], self.index_map)
         try:
@@ -204,7 +199,11 @@ class LoadImagesAndLabels(Dataset):  # for training
             # pad and resize
             img, labels = letterbox(img, labels, height=self.img_size, mode=self.mode)
             # Augment image and labels
-            img, labels = random_affine(img, labels, degrees=(-5, 5), translate=(0.10, 0.10), scale=(0.90, 1.10))
+            img, labels = random_affine(img, labels,
+                                        degrees=hyp['degrees'],
+                                        translate=hyp['translate'],
+                                        scale=hyp['scale'],
+                                        shear=hyp['shear'])
             # random left-right flip
             img, labels = random_flip(img, labels, 0.5)
             # color distort
@@ -250,7 +249,7 @@ class LoadImagesAndLabels(Dataset):  # for training
     def __len__(self):
         return self.nF  # number of batches
 
-    
+
     def validate_label(self, xmin, ymin, xmax, ymax, width, height):
         """Validate labels."""
         assert 0 <= xmin < width, "xmin must in [0, {}), given {}".format(width, xmin)
@@ -264,7 +263,7 @@ class LoadImagesAndLabels(Dataset):  # for training
         size=tree.find('size')
         width = float(size.find('width').text)
         height = float(size.find('height').text)
-        
+
         objs = tree.findall('object')
         num_objs = len(objs)
         boxes = np.zeros((num_objs, 5), dtype=np.float32)
@@ -282,14 +281,14 @@ class LoadImagesAndLabels(Dataset):  # for training
             y1 = float(bbox.find('ymin').text)
             x2 = float(bbox.find('xmax').text)
             y2 = float(bbox.find('ymax').text)
-            
+
             try:
                 self.validate_label(x1, y1, x2, y2, width, height)
             except AssertionError as e:
                 raise RuntimeError("Invalid label at {}, {}".format(anno_path, e))
-       
+
             boxes[ix, 1:] = [x1, y1, x2, y2]
-        
+
         return boxes
 
 
@@ -301,6 +300,7 @@ def convert_tif2bmp(p='../xview/val_images_bmp'):
         print('%g/%g' % (i + 1, len(files)))
         cv2.imwrite(f.replace('.tif', '.bmp'), cv2.imread(f))
         os.system('rm -rf ' + f)
+
 
 def show_image(img, labels):
     import matplotlib.pyplot as plt

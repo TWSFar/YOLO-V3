@@ -4,25 +4,25 @@ import json
 from torch.utils.data import DataLoader
 
 from models import *
-from data.dataset import *
+from dataloader.dataset import *
 from utils.utils import *
 
 
-def test(
-        opt, 
-        cfg,
-        weights=None,
-        batch_size=16,
-        img_size=416,
-        iou_thres=0.5,
-        conf_thres=0.001,
-        nms_thres=0.5,
-        save_json=False,
-        model=None,
-        classes=[]
-):
+def test(cfg,
+         root_path=None,
+         weights=None,
+         batch_size=16,
+         img_size=608,
+         iou_thres=0.5,
+         conf_thres=0.001,
+         nms_thres=0.5,
+         save_json=False,
+         model=None,
+         classes=[]):
+    # Initialize/load model and set device
     if model is None:
-        device = torch_utils.select_device()
+        device = torch_utils.select_device(opt.device)
+        verbose = True
 
         # Initialize model
         model = Darknet(cfg, img_size).to(device)
@@ -37,35 +37,35 @@ def test(
             model = nn.DataParallel(model)
     else:
         device = next(model.parameters()).device  # get model device
+        verbose = False
 
     # Configure run
-    nc = opt.number_classes
-    root_path = opt.root_path  # path to test images
-    classes = classes
+    nc = len(classes)
 
     # Dataloader
     # dataset = VOCDetection(opt, test_path, classes, img_size, batch_size)
     dataset = LoadImagesAndLabels(
-                        root=opt.root_path,
-                        mode="test",
+                        root=root_path,
+                        mode="val",
                         img_size=img_size,
                         batch_size=16,
                         classes=classes)
 
     dataloader = DataLoader(dataset,
                             batch_size=batch_size,
-                            num_workers=4,
+                            num_workers=min([os.cpu_count(), batch_size, 16]),
                             pin_memory=True,
                             collate_fn=dataset.collate_fn)
 
     seen = 0
-    model.eval() # this make the output of model be different with model.train()
-    #model.train()
+    model.eval()  # this make the output of model be different with model.train()
+    # model.train()
     # coco91class = coco80_to_coco91_class()
-    print(('%20s' + '%10s' * 6) % ('Class', 'Images', 'Targets', 'P', 'R', 'mAP', 'F1'))
-    loss, p, r, f1, mp, mr, map, mf1 = 0., 0., 0., 0., 0., 0., 0., 0.
+    s = ('%20s' + '%10s' * 6) % ('Class', 'Images', 'Targets', 'P', 'R', 'mAP', 'F1')
+    p, r, f1, mp, mr, map, mf1 = 0., 0., 0., 0., 0., 0., 0.
+    loss = torch.zeros(3)
     jdict, stats, ap, ap_class = [], [], [], []
-    for batch_i, (imgs, targets, paths, shapes) in enumerate(tqdm(dataloader, desc='Computing mAP')):
+    for batch_i, (imgs, targets, paths, shapes) in enumerate(tqdm(dataloader, desc=s)):
         targets = targets.to(device)
         imgs = imgs.to(device)
         _, _, height, width = imgs.shape  # batch size, channels, height, width
@@ -79,8 +79,7 @@ def test(
 
         # Compute loss
         if hasattr(model, 'hyp'):  # if model has loss hyperparameters
-            loss_i, _ = compute_loss(train_out, targets, model)
-            loss += loss_i.item()
+            loss += compute_loss(train_out, targets, model)[1][:3].cpu()  # GIoU, obj, cls
 
         # Run NMS
         output = non_max_suppression(inf_out, conf_thres=conf_thres, nms_thres=nms_thres)
@@ -96,7 +95,7 @@ def test(
                 if nl:
                     stats.append(([], torch.Tensor(), torch.Tensor(), tcls))
                 continue
-            
+
                 # Append to text file
                 with open('result/test.txt', 'a') as file:
                    [file.write('%11.5g' * 7 % tuple(x) + '\n') for x in pred]
@@ -117,6 +116,9 @@ def test(
                             'score': float(d[4])
                         })
                 '''
+
+            # Clip boxes to image bounds
+            clip_coords(pred, (height, width))
 
             # Assign all predictions as incorrect
             correct = [0] * len(pred)
@@ -154,10 +156,12 @@ def test(
 
     # Compute statistics
     stats = [np.concatenate(x, 0) for x in list(zip(*stats))]  # to numpy
-    nt = np.bincount(stats[3].astype(np.int64), minlength=nc)  # number of targets per class
     if len(stats):
         p, r, ap, f1, ap_class = ap_per_class(*stats)
         mp, mr, map, mf1 = p.mean(), r.mean(), ap.mean(), f1.mean()
+        nt = np.bincount(stats[3].astype(np.int64), minlength=nc)  # number of targets per class
+    else:
+        nt = torch.zeros(1)
 
     # Print results
     pf = '%20s' + '%10.3g' * 6  # print format
@@ -166,35 +170,13 @@ def test(
     # Print results per class
     if nc > 1 and len(stats):
         for i, c in enumerate(ap_class):
-            print(pf % (names[c], seen, nt[c], p[i], r[i], ap[i], f1[i]))
-
-    # Save JSON
-    '''
-    if save_json and map and len(jdict):
-        imgIds = [int(Path(x).stem.split('_')[-1]) for x in dataset.img_files]
-        with open('results.json', 'w') as file:
-            json.dump(jdict, file)
-
-        from pycocotools.coco import COCO
-        from pycocotools.cocoeval import COCOeval
-
-        # https://github.com/cocodataset/cocoapi/blob/master/PythonAPI/pycocoEvalDemo.ipynb
-        cocoGt = COCO('../coco/annotations/instances_val2014.json')  # initialize COCO ground truth api
-        cocoDt = cocoGt.loadRes('results.json')  # initialize COCO pred api
-
-        cocoEval = COCOeval(cocoGt, cocoDt, 'bbox')
-        cocoEval.params.imgIds = imgIds  # [:32]  # only evaluate these images
-        cocoEval.evaluate()
-        cocoEval.accumulate()
-        cocoEval.summarize()
-        map = cocoEval.stats[1]  # update mAP to pycocotools mAP
-    '''
+            print(pf % (classes[c], seen, nt[c], p[i], r[i], ap[i], f1[i]))
 
     # Return results
     maps = np.zeros(nc) + map
     for i, c in enumerate(ap_class):
         maps[c] = ap[i]
-    return (mp, mr, map, mf1, loss / len(dataloader)), maps
+    return (mp, mr, map, mf1, *(loss / len(dataloader)).tolist()), maps
 
 
 if __name__ == '__main__':

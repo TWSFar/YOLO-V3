@@ -7,14 +7,19 @@ def init_seeds(seed=0):
     torch.cuda.manual_seed_all(seed)
 
 
-def select_device(force_cpu=False, apex=False):
-    cuda = False if force_cpu else torch.cuda.is_available()
+def select_device(device=None, apex=False):
+    if device == 'cpu':
+        pass
+    elif device:  # Set environment variable if device is specified
+        os.environ['CUDA_VISIBLE_DEVICES'] = device
+
+    # apex if mixed precision training https://github.com/NVIDIA/apex
+    cuda = False if device == 'cpu' else torch.cuda.is_available()
     device = torch.device('cuda:0' if cuda else 'cpu')
 
     if not cuda:
         print('Using CPU')
     if cuda:
-        torch.backends.cudnn.benchmark = True
         c = 1024 ** 2  # bytes to MB
         ng = torch.cuda.device_count()
         x = [torch.cuda.get_device_properties(i) for i in range(ng)]
@@ -27,7 +32,7 @@ def select_device(force_cpu=False, apex=False):
                   (cuda_str, i, x[i].name, x[i].total_memory / c))
 
     print('')  # skip a line
-    return device, ng
+    return device
 
 
 def fuse_conv_and_bn(conv, bn):
