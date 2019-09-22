@@ -14,6 +14,8 @@
 
 4. 修改--weights为预训练权重地址, 为空的将会自动下载
 
-5. python train.py
+5. 修改 yolov3-spp.cfg 中 [yolo]至上的[[convolutional]]的filters为(训练集的类别数+5)*3
+
+6. python train.py
 
 
