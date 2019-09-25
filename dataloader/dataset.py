@@ -165,6 +165,7 @@ class LoadImagesAndLabels(Dataset):  # for training
         """Load individual image indices from splits."""
         ids = []
         root = self._root
+        # lf = os.path.join(root, 'ImageSets', 'Main', mode + '.txt')
         lf = os.path.join(root, 'ImageSets', 'Main', mode + '.txt')
         with open(lf, 'r') as f:
             ids += [line.strip() for line in f.readlines()]
@@ -193,10 +194,10 @@ class LoadImagesAndLabels(Dataset):  # for training
         if self.mode == 'train':
             # hsv
             img = augment_hsv(img, fraction=0.5)
-            # random crop
+            # # random crop
             labels, crop = random_crop_with_constraints(labels, (w, h))
             img = img[crop[1]:crop[1]+crop[3], crop[0]:crop[0]+crop[2], :].copy()
-            # pad and resize
+            # # pad and resize
             img, labels = letterbox(img, labels, height=self.img_size, mode=self.mode)
             # Augment image and labels
             img, labels = random_affine(img, labels,
@@ -207,14 +208,14 @@ class LoadImagesAndLabels(Dataset):  # for training
             # random left-right flip
             img, labels = random_flip(img, labels, 0.5)
             # color distort
-            # img = random_color_distort(img)
+            img = random_color_distort(img)
         else:
             # pad and resize
             img, labels = letterbox(img, labels, height=self.img_size, mode=self.mode)
 
+        nL = len(labels)
         # show_image(img, labels)
 
-        nL = len(labels)
         if nL > 0:
             # convert xyxy to xywh 
             labels = np.clip(labels, 0, self.img_size - 1) # 这里可能存在bug, 当类的数量大于输入图像的输入大小时, 就炸了???
@@ -228,6 +229,7 @@ class LoadImagesAndLabels(Dataset):  # for training
         img = img[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB
         img = np.ascontiguousarray(img, dtype=np.float32)
         img = normalize(img)
+        # img /= 255.0
 
         labels_out = torch.zeros((nL, 6))
         if nL:

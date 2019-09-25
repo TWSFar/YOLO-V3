@@ -48,7 +48,7 @@ def test(cfg,
                         root=root_path,
                         mode="val",
                         img_size=img_size,
-                        batch_size=16,
+                        batch_size=batch_size,
                         classes=classes)
 
     dataloader = DataLoader(dataset,

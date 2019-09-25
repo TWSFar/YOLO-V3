@@ -1,3 +1,4 @@
+import visdom
 import argparse
 
 import torch.distributed as dist
@@ -8,6 +9,7 @@ import test  # import test.py to get mAP after each epoch
 from models import *
 from dataloader.dataset import *
 from utils.utils import *
+from utils.visualization import create_vis_plot, update_vis_plot
 import multiprocessing
 multiprocessing.set_start_method('spawn', True)
 
@@ -24,16 +26,18 @@ results_file = 'results.txt'
 
 # Hyperparameters (j-series, 50.5 mAP yolov3-320) evolved by @ktian08 https://github.com/ultralytics/yolov3/issues/310
 hyp = {'giou': 1.582,  # giou loss gain
-       'cls': 27.76,  # cls loss gain  (CE=~1.0, uCE=~20)
+       'xy': 0.20,  # xy loss gain
+       'wh': 0.10,  # wh loss gain
+       'cls': 0.035,  # cls loss gain  (CE=~1.0, uCE=~20)
        'cls_pw': 1.446,  # cls BCELoss positive_weight
-       'obj': 21.35,  # obj loss gain (*=80 for uBCE with 80 classes)
-       'obj_pw': 3.941,  # obj BCELoss positive_weight
-       'iou_t': 0.2635,  # iou training threshold
-       'lr0': 0.002324,  # initial learning rate (SGD=1E-3, Adam=9E-5)
+       'conf': 1.61,  # obj loss gain (*=80 for uBCE with 80 classes)
+       'conf_bpw': 3.941,  # obj BCELoss positive_weight
+       'iou_t': 0.5,  # iou training threshold
+       'lr0': 0.0026,  # initial learning rate (SGD=1E-3, Adam=9E-5)
        'lrf': -4.,  # final LambdaLR learning rate = lr0 * (10 ** lrf)
-       'momentum': 0.97,  # SGD momentum
-       'weight_decay': 0.0004569,  # optimizer weight decay
-       'fl_gamma': 0.5,  # focal loss gamma
+       'momentum': 0.90,  # SGD momentum
+       'weight_decay': 0.0005,  # optimizer weight decay
+       'fl_gamma': 0.05,  # focal loss gamma
        'hsv_s': 0.5703,  # image HSV-Saturation augmentation (fraction)
        'hsv_v': 0.3174,  # image HSV-Value augmentation (fraction)
        'degrees': 1.113,  # image rotation (+/- deg)
@@ -51,7 +55,7 @@ classes = ('aeroplane', 'bicycle', 'bird', 'boat', 'bottle', 'bus', 'car',
 def train():
     cfg = opt.cfg
     img_size = opt.img_size
-    epochs = epochs = 1 if opt.prebias else opt.epochs
+    epochs = 1 if opt.prebias else opt.epochs
     batch_size = opt.batch_size
     accumulate = opt.accumulate
     weights = opt.weights
@@ -69,28 +73,27 @@ def train():
         img_size_min = round(img_size / 32 / 1.5) + 1
         img_size_max = round(img_size / 32 * 1.5) - 1
         img_size = img_size_max * 32  # initiate with maximum multi_scale size
-        print('Using multi-scale %g - %g' % (img_sz_min * 32, img_size))
+        print('Using multi-scale %g - %g' % (img_size_min * 32, img_size_max * 32))
 
     # Remove previous results
     for f in glob.glob('*_batch*.jpg') + glob.glob(results_file):
         os.remove(f)
 
+    # Visdom
+    if opt.visdom:
+        vis = visdom.Visdom()
+        vis_legend = ['lxy', 'lwh', 'lconf', 'lcls', 'Loss', 'P', 'R', 'mAP', 'F1']
+        batch_plot = create_vis_plot(vis, 'Batch', 'Loss', 'batch loss', vis_legend[0:5])
+        val_plot = create_vis_plot(vis, 'Epoch', 'result', 'val result', vis_legend[4:8])
+
     # Initialize model
-    model = Darknet(cfg, arc=opt.arc).to(device)
+    model = Darknet(cfg, img_size).to(device)
 
     # Optimizer
-    pg0, pg1 = [], []
-    for k, v in dict(model.named_parameters()).items():
-        if 'Conv2d.weight' in k:
-            pg1 += [v]
-        else:
-            pg0 += [v]
     if opt.adam:
-        optimizer = opt.Adam(pg0, lr=hyp['lr0'])
+        optimizer = optim.Adam(model.parameters(), lr=hyp['lr0'], momentum=hyp['momentum'], weight_decay=hyp['weight_decay'])
     else:
-        optimizer = optim.SGD(pg0, lr=hyp['lr0'], momentum=hyp['momentum'], nesterov=True)
-    optimizer.add_param_group({'params': pg1, 'weight_decay': hyp['weight_decay']})  # add pg1 with weight_decay
-    del pg0, pg1
+        optimizer = optim.SGD(model.parameters(), lr=hyp['lr0'], momentum=hyp['momentum'], weight_decay=hyp['weight_decay'])
 
     cutoff = -1  # backbone reaches to cutoff layer
     start_epoch = 0
@@ -124,6 +127,7 @@ def train():
     elif len(weights) > 0:  # darknet format
         # possible weights are 'yolov3.weights', 'yolov3-tiny.conv.15',  'darknet53.conv.74' etc.
         cutoff = load_darknet_weights(model, weights)
+        # pass
 
     if opt.transfer or opt.prebias:  # transfer learning edge (yolo) layers
         nf = int(model.module_defs[model.yolo_layers[0] - 1]['filters'])  # yolo layer size (i.e. 255)
@@ -184,7 +188,7 @@ def train():
     t0 = time.time()
     for epoch in range(start_epoch, epochs):  # epoch ------------------------------------------------------------------
         model.train() # set train
-        print(('\n' + '%10s' * 8) % ('Epoch', 'gpu_mem', 'GIoU', 'obj', 'cls', 'total', 'targets', 'img_size'))
+        print(('\n' + '%10s' * 10) % ('Epoch', 'gpu_mem', 'lr', 'xy', 'wh', 'obj', 'cls', 'total', 'targets', 'img_size'))
 
         # Freeze backbone at epoch 0, unfreeze at epoch 1 (optional)
         freeze_backbone = False
@@ -198,7 +202,7 @@ def train():
         # image_weights = labels_to_image_weights(dataset.labels, nc=nc, class_weights=w)
         # dataset.indices = random.choices(range(dataset.n), weights=image_weights, k=dataset.n)  # random weighted index
 
-        mloss = torch.zeros(4).to(device)  # mean losses
+        mloss = torch.zeros(5).to(device)  # mean losses
         pbar = tqdm(enumerate(dataloader), total=nb)  # progress bar
         for i, (imgs, targets, paths, _) in pbar:  # batch -------------------------------------------------------------
             ni = i + nb * epoch  # number integrated batches (since train start)
@@ -208,7 +212,7 @@ def train():
             # Multi-Scale training
             if multi_scale:
                 if ni / accumulate % 10 == 0:  #  adjust (67% - 150%) every 10 batches
-                    img_size = random.randrange(img_sz_min, img_sz_max + 1) * 32
+                    img_size = random.randrange(img_size_min, img_size_max + 1) * 32
                 sf = img_size / max(imgs.shape[2:])  # scale factor
                 if sf != 1:
                     ns = [math.ceil(x * sf / 32.) * 32 for x in imgs.shape[2:]]  # new shape (stretched to 32-multiple)
@@ -248,10 +252,15 @@ def train():
             # Print batch results
             mloss = (mloss * i + loss_items) / (i + 1)  # update mean losses
             mem = torch.cuda.memory_cached() / 1E9 if torch.cuda.is_available() else 0  # (GB)
-            s = ('%10s' * 2 + '%10.3g' * 6) % (
-                '%g/%g' % (epoch, epochs - 1), '%.3gG' % mem, *mloss, len(targets), img_size)
+            s = ('%10s' * 2 + '%10.3g' * 8) % (
+                '%g/%g' % (epoch, epochs - 1),
+                '%.3gG' % mem,
+                optimizer.param_groups[0]['lr'], *mloss, len(targets), img_size)
             pbar.set_description(s)
 
+            # visdom
+            if opt.visdom:
+                update_vis_plot(vis, i, loss_items.cpu().tolist(), batch_plot, 'append')
             # end batch ------------------------------------------------------------------------------------------------
 
         # Update scheduler
@@ -317,6 +326,9 @@ def train():
             # Delete checkpoint
             del chkpt
 
+        # visdom
+        if opt.visdom:
+            update_vis_plot(vis, epoch, result[0:4].cpu().tolist(), val_plot, 'append')
         # end epoch ----------------------------------------------------------------------------------------------------
 
     # end training
@@ -342,12 +354,12 @@ def print_mutation(hyp, results):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--epochs', type=int, default=200)  # 500200 batches at bs 16, 117263 images = 273 epochs
-    parser.add_argument('--batch-size', type=int, default=3)  # effective bs = batch_size * accumulate = 16 * 4 = 64
-    parser.add_argument('--accumulate', type=int, default=2, help='batches to accumulate before optimizing')
-    parser.add_argument('--cfg', type=str, default='cfg/yolov3-spp.cfg', help='cfg file path')
+    parser.add_argument('--batch-size', type=int, default=8)  # effective bs = batch_size * accumulate = 16 * 4 = 64
+    parser.add_argument('--accumulate', type=int, default=4, help='batches to accumulate before optimizing')
+    parser.add_argument('--cfg', type=str, default='cfg/yolov3-voc.cfg', help='cfg file path')
     parser.add_argument('--data', type=str, default='data/coco.data', help='*.data file path')
     parser.add_argument('--multi-scale', action='store_true', help='adjust (67% - 150%) img_size every 10 batches')
-    parser.add_argument('--img-size', type=int, default=608, help='inference size (pixels)')
+    parser.add_argument('--img-size', type=int, default=416, help='inference size (pixels)')
     parser.add_argument('--rect', action='store_true', help='rectangular training')
     parser.add_argument('--resume', action='store_true', help='resume training from last.pt')
     parser.add_argument('--transfer', action='store_true', help='transfer learning')
@@ -358,15 +370,16 @@ if __name__ == '__main__':
     parser.add_argument('--img-weights', action='store_true', help='select training images by weight')
     parser.add_argument('--cache-images', action='store_true', help='cache images for faster training')
     parser.add_argument('--weights', type=str, default='/home/twsf/.cache/torch/checkpoints/darknet53.conv.74', help='initial weights')  # i.e. weights/darknet.53.conv.74
-    parser.add_argument('--arc', type=str, default='defaultpw', help='yolo architecture')  # defaultpw, uCE, uBCE
+    parser.add_argument('--arc', type=str, default='default', help='yolo architecture')  # defaultpw, uCE, uBCE
     parser.add_argument('--prebias', action='store_true', help='transfer-learn yolo biases prior to training')
     parser.add_argument('--name', default='', help='renames results.txt to results_name.txt if supplied')
     parser.add_argument('--device', default='', help='device id (i.e. 0 or 0,1) or cpu')
     parser.add_argument('--adam', action='store_true', help='use adam optimizer')
     parser.add_argument('--var', type=float, help='debug variable')
-    parser.add_argument('--root_path', type=str, default="/home/twsf/data/VOC2012/", help='path of datasets')
+    parser.add_argument('--root_path', type=str, default="/home/twsf/data/VOC2012", help='path of datasets')
+    parser.add_argument('--visdom', default=True, type=bool, help='Use visdom for loss visualization')
     opt = parser.parse_args()
-    opt.weights = last if opt.resume else opt.weights
+    opt.weights = best if opt.resume else opt.weights
     print(opt)
     device = torch_utils.select_device(opt.device, apex=mixed_precision)
 

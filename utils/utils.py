@@ -314,131 +314,101 @@ class FocalLoss(nn.Module):
             return loss
 
 
-def compute_loss(p, targets, model):  # predictions, targets, model
+def compute_loss(p, targets, model, giou_loss=False):  # predictions, targets, model
     ft = torch.cuda.FloatTensor if p[0].is_cuda else torch.Tensor
-    lcls, lbox, lobj = ft([0]), ft([0]), ft([0])
-    tcls, tbox, indices, anchor_vec = build_targets(model, targets)
+    lxy, lwh, lcls, lconf = ft([0]), ft([0]), ft([0]), ft([0])
+    txy, twh, tcls, tbox, indices, anchor_vec = build_targets(model, targets)
     h = model.hyp  # hyperparameters
     arc = model.arc  # # (default, uCE, uBCE) detection architectures
 
     # Define criteria
-    BCEcls = nn.BCEWithLogitsLoss(pos_weight=ft([h['cls_pw']]))
-    BCEobj = nn.BCEWithLogitsLoss(pos_weight=ft([h['obj_pw']]))
-    BCE = nn.BCEWithLogitsLoss()
-    CE = nn.CrossEntropyLoss()  # weight=model.class_weights
+    MSE = nn.MSELoss()
+    CE = nn.CrossEntropyLoss()  # (weight=model.class_weights)
+    BCE = nn.BCEWithLogitsLoss(pos_weight=ft([h['conf_bpw']]))
 
     if 'F' in arc:  # add focal loss
         g = h['fl_gamma']
-        BCEcls, BCEobj, BCE, CE = FocalLoss(BCEcls, g), FocalLoss(BCEobj, g), FocalLoss(BCE, g), FocalLoss(CE, g)
+        BCEobj, MSE, CE = FocalLoss(BCEobj, g), FocalLoss(MSE, g), FocalLoss(CE, g)
 
     # Compute losses
-    for i, pi in enumerate(p):  # layer index, layer predictions
+    bs = p[0].shape[0]  # batch size
+    k = bs  # loss gain
+    for i, pi0 in enumerate(p):  # layer i predictions, i
         b, a, gj, gi = indices[i]  # image, anchor, gridy, gridx
-        tobj = torch.zeros_like(pi[..., 0])  # target obj
+        tobj = torch.zeros_like(pi0[..., 0])  # conf
 
         # Compute losses
         nb = len(b)
         if nb:  # number of targets
-            ps = pi[b, a, gj, gi]  # prediction subset corresponding to targets
-            tobj[b, a, gj, gi] = 1.0  # obj
-            # ps[:, 2:4] = torch.sigmoid(ps[:, 2:4])  # wh power loss (uncomment)
+            pi = pi0[b, a, gj, gi]  # predictions closest to anchors
+            tobj[b, a, gj, gi] = 1  # conf
+            # pi[..., 2:4] = torch.sigmoid(pi[..., 2:4])  # wh power loss (uncomment)
 
-            # GIoU
-            pxy = torch.sigmoid(ps[:, 0:2])  # pxy = pxy * s - (s - 1) / 2,  s = 1.5  (scale_xy)
-            pbox = torch.cat((pxy, torch.exp(ps[:, 2:4]) * anchor_vec[i]), 1)  # predicted box
-            giou = bbox_iou(pbox.t(), tbox[i], x1y1x2y2=False, GIoU=True)  # giou computation
-            lbox += (1.0 - giou).mean()  # giou loss
+            # Build GIoU boxes
+            pbox = torch.cat((torch.sigmoid(pi[..., 0:2]), torch.exp(pi[..., 2:4]) * anchor_vec[i]), 1)  # predicted box
+            giou = bbox_iou(pbox.t(), tbox[i], x1y1x2y2=False, GIoU=True)
 
-            if 'default' in arc and model.nc > 1:  # cls loss (only if multiple classes)
-                t = torch.zeros_like(ps[:, 5:])  # targets
-                t[range(nb), tcls[i]] = 1.0
-                lcls += BCEcls(ps[:, 5:], t)  # BCE
-                # lcls += CE(ps[:, 5:], tcls[i])  # CE
+            if giou_loss:
+                lxy += (k * h['giou']) * (1.0 - giou).mean()  # giou loss
+            else:
+                lxy += (k * h['xy']) * MSE(torch.sigmoid(pi[..., 0:2]), txy[i])  # xy loss
+                lwh += (k * h['wh']) * MSE(pi[..., 2:4], twh[i])  # wh yolo loss
+            lcls += (k * h['cls']) * CE(pi[..., 5:], tcls[i])  # class_conf loss
 
-                # Instance-class weighting (use with reduction='none')
-                # nt = t.sum(0) + 1  # number of targets per class
-                # lcls += (BCEcls(ps[:, 5:], t) / nt).mean() * nt.mean()  # v1
-                # lcls += (BCEcls(ps[:, 5:], t) / nt[tcls[i]].view(-1,1)).mean() * nt.mean()  # v2
+        lconf += (k * h['conf']) * BCE(pi0[..., 4], tobj)  # obj loss
 
-            # Append targets to text file
-            # with open('targets.txt', 'a') as file:
-            #     [file.write('%11.5g ' * 4 % tuple(x) + '\n') for x in torch.cat((txy[i], twh[i]), 1)]
-
-        if 'default' in arc:  # seperate obj and cls
-            # lobj += BCEobj(pi[..., 4], tobj)  # obj loss
-            temp = BCEobj(pi[..., 4], tobj)  # obj loss
-            lobj += temp
-        elif 'BCE' in arc:  # unified BCE (80 classes)
-            t = torch.zeros_like(pi[..., 5:])  # targets
-            if nb:
-                t[b, a, gj, gi, tcls[i]] = 1.0
-            lobj += BCE(pi[..., 5:], t)
-
-        elif 'CE' in arc:  # unified CE (1 background + 80 classes)
-            t = torch.zeros_like(pi[..., 0], dtype=torch.long)  # targets
-            if nb:
-                t[b, a, gj, gi] = tcls[i] + 1
-            lcls += CE(pi[..., 4:].view(-1, model.nc + 1), t.view(-1))
-
-    lbox *= h['giou']
-    lobj *= h['obj']
-    lcls *= h['cls']
-    loss = lbox + lobj + lcls
-    return loss, torch.cat((lbox, lobj, lcls, loss)).detach()
+    loss = lxy + lwh + lconf + lcls
+    return loss, torch.cat((lxy, lwh, lconf, lcls, loss)).detach()
 
 
 def build_targets(model, targets):
     # targets = [image, class, x, y, w, h]
+    iou_thres = model.hyp['iou_t']  # hyperparameter
+    if type(model) in (nn.parallel.DataParallel, nn.parallel.DistributedDataParallel):
+        model = model.module
 
     nt = len(targets)
-    tcls, tbox, indices, av = [], [], [], []
-    multi_gpu = type(model) in (nn.parallel.DataParallel, nn.parallel.DistributedDataParallel)
+    txy, twh, tcls, tbox, indices, anchor_vec = [], [], [], [], [], []
     for i in model.yolo_layers:
-        # get number of grid points and anchor vec for this yolo layer
-        if multi_gpu:
-            ng, anchor_vec = model.module.module_list[i].ng, model.module.module_list[i].anchor_vec
-        else:
-            ng, anchor_vec = model.module_list[i].ng, model.module_list[i].anchor_vec
+        layer = model.module_list[i]
 
         # iou of targets-anchors
         t, a = targets, []
-        gwh = t[:, 4:6] * ng
+        gwh = targets[:, 4:6] * layer.ng
         if nt:
-            iou = torch.stack([wh_iou(x, gwh) for x in anchor_vec], 0)
+            iou = [wh_iou(x, gwh) for x in layer.anchor_vec]
+            iou, a = torch.stack(iou, 0).max(0)  # best iou and anchor
 
-            use_best_anchor = False
-            if use_best_anchor:
-                iou, a = iou.max(0)  # best iou and anchor
-            else:  # use all anchors
-                na = len(anchor_vec)  # number of anchors
-                a = torch.arange(na).view((-1, 1)).repeat([1, nt]).view(-1)
-                t = targets.repeat([na, 1])
-                gwh = gwh.repeat([na, 1])
-                iou = iou.view(-1)  # use all ious
-
-            # reject anchors below iou_thres (OPTIONAL, increases P, lowers R)
+            # reject below threshold ious (OPTIONAL, increases P, lowers R)
             reject = True
             if reject:
-                j = iou > model.hyp['iou_t']  # iou threshold hyperparameter
-                t, a, gwh = t[j], a[j], gwh[j]
+                j = iou > iou_thres
+                t, a, gwh = targets[j], a[j], gwh[j]
 
         # Indices
         b, c = t[:, :2].long().t()  # target image, class
-        gxy = t[:, 2:4] * ng  # grid x, y
+        gxy = t[:, 2:4] * layer.ng  # grid x, y
         gi, gj = gxy.long().t()  # grid x, y indices
         indices.append((b, a, gj, gi))
 
+        # XY coordinates
+        gxy -= gxy.floor()
+        txy.append(gxy)
+
         # GIoU
-        gxy -= gxy.floor()  # xy
         tbox.append(torch.cat((gxy, gwh), 1))  # xywh (grids)
-        av.append(anchor_vec[a])  # anchor vec
+        anchor_vec.append(layer.anchor_vec[a])
+
+        # Width and height
+        twh.append(torch.log(gwh / layer.anchor_vec[a]))  # wh yolo method
+        # twh.append((gwh / layer.anchor_vec[a]) ** (1 / 3) / 2)  # wh power method
 
         # Class
         tcls.append(c)
-        if c.shape[0]:  # if any targets
-            assert c.max() <= model.nc, 'Target classes exceed model classes'
+        if c.shape[0]:
+            assert c.max() <= layer.nc, 'Target classes exceed model classes'
 
-    return tcls, tbox, indices, av
+    return txy, twh, tcls, tbox, indices, anchor_vec
 
 
 def iou_calc1(boxes1, boxes2):
@@ -476,8 +446,8 @@ def non_max_suppression(prediction, conf_thres=0.5, nms_thres=0.5):
     """
 
     min_wh = 2  # (pixels) minimum box width and height
-
     output = [None] * len(prediction)
+
     for image_i, pred in enumerate(prediction):
         # Experiment: Prior class size rejection
         # x, y, w, h = pred[:, 0], pred[:, 1], pred[:, 2], pred[:, 3]
