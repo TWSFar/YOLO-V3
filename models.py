@@ -101,7 +101,7 @@ class YOLOLayer(nn.Module):
         self.nc = nc  # number of classes (80)
         self.nx = 0  # initialize number of x gridpoints
         self.ny = 0  # initialize number of y gridpoints
-
+        # self.ng = torch.Tensor([int(img_size[1] / stride), int(img_size[0] / stride)]).to(device)
         if ONNX_EXPORT:  # grids must be computed in __init__
             stride = [32, 16, 8][yolo_index]  # stride of this layer
             nx = int(img_size[1] / stride)  # number x grid points
@@ -237,7 +237,6 @@ def create_grids(self, img_size=416, ng=(13, 13), device='cpu', type=torch.float
     self.ng = torch.Tensor(ng).to(device)
     self.nx = nx
     self.ny = ny
-
 
 def load_darknet_weights(self, weights, cutoff=-1):
     # Parses and loads the weights stored in 'weights'

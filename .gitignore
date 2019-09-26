@@ -4,6 +4,7 @@ _pycache_
 
 # My configurations:
 data/
+work_dirs/
 weights/
 .vscode/
 debug/

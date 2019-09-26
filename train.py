@@ -19,7 +19,7 @@ try:  # Mixed precision training https://github.com/NVIDIA/apex
 except:
     mixed_precision = False  # not installed
 
-wdir = 'weights' + os.sep  # weights dir
+wdir = 'work_dirs' + os.sep  # weights dir
 last = wdir + 'last.pt'
 best = wdir + 'best.pt'
 results_file = 'results.txt'
@@ -33,9 +33,9 @@ hyp = {'giou': 1.582,  # giou loss gain
        'conf': 1.61,  # obj loss gain (*=80 for uBCE with 80 classes)
        'conf_bpw': 3.941,  # obj BCELoss positive_weight
        'iou_t': 0.5,  # iou training threshold
-       'lr0': 0.0026,  # initial learning rate (SGD=1E-3, Adam=9E-5)
+       'lr0': 0.0005,  # initial learning rate (SGD=1E-3, Adam=9E-5)
        'lrf': -4.,  # final LambdaLR learning rate = lr0 * (10 ** lrf)
-       'momentum': 0.90,  # SGD momentum
+       'momentum': 0.97,  # SGD momentum
        'weight_decay': 0.0005,  # optimizer weight decay
        'fl_gamma': 0.05,  # focal loss gamma
        'hsv_s': 0.5703,  # image HSV-Saturation augmentation (fraction)
@@ -84,10 +84,10 @@ def train():
         vis = visdom.Visdom()
         vis_legend = ['lxy', 'lwh', 'lconf', 'lcls', 'Loss', 'P', 'R', 'mAP', 'F1']
         batch_plot = create_vis_plot(vis, 'Batch', 'Loss', 'batch loss', vis_legend[0:5])
-        val_plot = create_vis_plot(vis, 'Epoch', 'result', 'val result', vis_legend[4:8])
+        val_plot = create_vis_plot(vis, 'Epoch', 'result', 'val result', vis_legend[5:9])
 
     # Initialize model
-    model = Darknet(cfg, img_size).to(device)
+    model = Darknet(cfg, img_size, opt.arc).to(device)
 
     # Optimizer
     if opt.adam:
@@ -154,10 +154,10 @@ def train():
         model, optimizer = amp.initialize(model, optimizer, opt_level='O1', verbosity=0)
 
     # Initialize distributed training
-    if torch.cuda.device_count() > 1:
-        dist.init_process_group(backend=opt.backend, init_method=opt.dist_url, world_size=opt.world_size, rank=opt.rank)
-        model = torch.nn.parallel.DistributedDataParallel(model)
-        model.yolo_layers = model.module.yolo_layers  # move yolo layer indices to top level
+    if torch.cuda.device_count() > 2:
+        print("Using multiple gpu")
+        model = torch.nn.DataParallel(model, device_ids=[0, 1])
+        # model.yolo_layers = model.module.yolo_layers  # move yolo layer indices to top level
         # sampler = torch.utils.data.distributed.DistributedSampler(dataset)
 
     # Dataset
@@ -301,6 +301,8 @@ def train():
         # Save training results
         save = (not opt.nosave) or (final_epoch and not opt.evolve) or opt.prebias
         if save:
+            if not osp.exists(wdir):
+                os.makedirs(wdir)
             with open(results_file, 'r') as f:
                 # Create checkpoint
                 chkpt = {'epoch': epoch,
@@ -328,7 +330,7 @@ def train():
 
         # visdom
         if opt.visdom:
-            update_vis_plot(vis, epoch, result[0:4].cpu().tolist(), val_plot, 'append')
+            update_vis_plot(vis, epoch, results[0:4].cpu().tolist(), val_plot, 'append')
         # end epoch ----------------------------------------------------------------------------------------------------
 
     # end training
@@ -370,7 +372,7 @@ if __name__ == '__main__':
     parser.add_argument('--img-weights', action='store_true', help='select training images by weight')
     parser.add_argument('--cache-images', action='store_true', help='cache images for faster training')
     parser.add_argument('--weights', type=str, default='/home/twsf/.cache/torch/checkpoints/darknet53.conv.74', help='initial weights')  # i.e. weights/darknet.53.conv.74
-    parser.add_argument('--arc', type=str, default='default', help='yolo architecture')  # defaultpw, uCE, uBCE
+    parser.add_argument('--arc', type=str, default='Fdefault', help='yolo architecture')  # defaultpw, uCE, uBCE
     parser.add_argument('--prebias', action='store_true', help='transfer-learn yolo biases prior to training')
     parser.add_argument('--name', default='', help='renames results.txt to results_name.txt if supplied')
     parser.add_argument('--device', default='', help='device id (i.e. 0 or 0,1) or cpu')

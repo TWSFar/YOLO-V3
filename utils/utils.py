@@ -328,7 +328,7 @@ def compute_loss(p, targets, model, giou_loss=False):  # predictions, targets, m
 
     if 'F' in arc:  # add focal loss
         g = h['fl_gamma']
-        BCEobj, MSE, CE = FocalLoss(BCEobj, g), FocalLoss(MSE, g), FocalLoss(CE, g)
+        BCE, MSE, CE = FocalLoss(BCE, g), FocalLoss(MSE, g), FocalLoss(CE, g)
 
     # Compute losses
     bs = p[0].shape[0]  # batch size
