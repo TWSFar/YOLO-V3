@@ -330,7 +330,7 @@ def train():
 
         # visdom
         if opt.visdom:
-            update_vis_plot(vis, epoch, results[0:4].cpu().tolist(), val_plot, 'append')
+            update_vis_plot(vis, epoch, results[0:4], val_plot, 'append')
         # end epoch ----------------------------------------------------------------------------------------------------
 
     # end training
