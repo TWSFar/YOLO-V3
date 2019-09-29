@@ -9,4 +9,4 @@ weights/
 .vscode/
 debug/
 log/
-debug.py
+.debug.py
