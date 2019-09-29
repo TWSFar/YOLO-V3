@@ -32,7 +32,7 @@ hyp = {'giou': 1.582,  # giou loss gain
        'cls_pw': 1.446,  # cls BCELoss positive_weight
        'conf': 1.61,  # obj loss gain (*=80 for uBCE with 80 classes)
        'conf_bpw': 3.941,  # obj BCELoss positive_weight
-       'iou_t': 0.5,  # iou training threshold
+       'iou_t': 0.3,  # iou training threshold
        'lr0': 0.0005,  # initial learning rate (SGD=1E-3, Adam=9E-5)
        'lrf': -4.,  # final LambdaLR learning rate = lr0 * (10 ** lrf)
        'momentum': 0.97,  # SGD momentum
@@ -166,7 +166,7 @@ def train():
                                   batch_size,
                                   hyp=hyp,  # augmentation hyperparameters
                                   classes=classes,
-                                  mode='train')
+                                  mode='trainval')
 
     # Dataloader
     dataloader = DataLoader(dataset,
@@ -358,7 +358,7 @@ if __name__ == '__main__':
     parser.add_argument('--epochs', type=int, default=200)  # 500200 batches at bs 16, 117263 images = 273 epochs
     parser.add_argument('--batch-size', type=int, default=8)  # effective bs = batch_size * accumulate = 16 * 4 = 64
     parser.add_argument('--accumulate', type=int, default=4, help='batches to accumulate before optimizing')
-    parser.add_argument('--cfg', type=str, default='cfg/yolov3-voc.cfg', help='cfg file path')
+    parser.add_argument('--cfg', type=str, default='cfg/yolov3-spp-voc2012.cfg', help='cfg file path')
     parser.add_argument('--data', type=str, default='data/coco.data', help='*.data file path')
     parser.add_argument('--multi-scale', action='store_true', help='adjust (67% - 150%) img_size every 10 batches')
     parser.add_argument('--img-size', type=int, default=416, help='inference size (pixels)')
@@ -378,7 +378,7 @@ if __name__ == '__main__':
     parser.add_argument('--device', default='', help='device id (i.e. 0 or 0,1) or cpu')
     parser.add_argument('--adam', action='store_true', help='use adam optimizer')
     parser.add_argument('--var', type=float, help='debug variable')
-    parser.add_argument('--root_path', type=str, default="/home/twsf/data/VOC2012", help='path of datasets')
+    parser.add_argument('--root_path', type=str, default="/home/twsf/work/YOLO-V3/data/VOC2012", help='path of datasets')
     parser.add_argument('--visdom', default=True, type=bool, help='Use visdom for loss visualization')
     opt = parser.parse_args()
     opt.weights = best if opt.resume else opt.weights

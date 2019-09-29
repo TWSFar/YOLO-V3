@@ -191,7 +191,7 @@ class LoadImagesAndLabels(Dataset):  # for training
         assert len(np.concatenate(labels, 0)) > 0, 'No labels found. Incorrect label paths provided.'
 
         #print(labels)
-        if self.mode == 'train':
+        if self.mode in ['tain', 'trainval']:
             # hsv
             img = augment_hsv(img, fraction=0.5)
             # # random crop
@@ -209,7 +209,7 @@ class LoadImagesAndLabels(Dataset):  # for training
             img, labels = random_flip(img, labels, 0.5)
             # color distort
             img = random_color_distort(img)
-        else:
+        elif self.mode in ['test', 'val']:
             # pad and resize
             img, labels = letterbox(img, labels, height=self.img_size, mode=self.mode)
 
