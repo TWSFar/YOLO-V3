@@ -8,4 +8,5 @@ work_dirs/
 weights/
 .vscode/
 debug/
-LOG.log
+log/
+debug.py
