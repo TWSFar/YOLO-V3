@@ -46,7 +46,7 @@ def test(cfg,
     # dataset = VOCDetection(opt, test_path, classes, img_size, batch_size)
     dataset = LoadImagesAndLabels(
                         root=root_path,
-                        mode="test",
+                        mode="val",
                         img_size=img_size,
                         batch_size=batch_size,
                         classes=classes)

@@ -166,7 +166,7 @@ def train():
                                   batch_size,
                                   hyp=hyp,  # augmentation hyperparameters
                                   classes=classes,
-                                  mode='trainval')
+                                  mode='train')
 
     # Dataloader
     dataloader = DataLoader(dataset,
@@ -378,7 +378,7 @@ if __name__ == '__main__':
     parser.add_argument('--device', default='', help='device id (i.e. 0 or 0,1) or cpu')
     parser.add_argument('--adam', action='store_true', help='use adam optimizer')
     parser.add_argument('--var', type=float, help='debug variable')
-    parser.add_argument('--root_path', type=str, default="/home/twsf/work/YOLO-V3/data/VOC2012", help='path of datasets')
+    parser.add_argument('--root_path', type=str, default="/home/twsf/data/VOC2012", help='path of datasets')
     parser.add_argument('--visdom', default=True, type=bool, help='Use visdom for loss visualization')
     opt = parser.parse_args()
     opt.weights = best if opt.resume else opt.weights
