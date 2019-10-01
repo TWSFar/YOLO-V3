@@ -41,7 +41,7 @@ def letterbox(img, labels, height=416, mode='train', color=(127.5, 127.5, 127.5)
         dh = (max(shape) - shape[0]) / 2  # height padding
         left, right = round(dw - 0.1), round(dw + 0.1)
         top, bottom = round(dh - 0.1), round(dh + 0.1)
-    elif mode == 'train' or mode == 'trainval':
+    elif mode in ["train", "trainval", "aug_train"]:
         dw = random.randint(0, max(shape) - shape[1])
         dh = random.randint(0, max(shape) - shape[0])
         left, right = dw, max(shape) - shape[1] - dw

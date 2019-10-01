@@ -324,8 +324,8 @@ def compute_loss(p, targets, model, giou_loss=False):  # predictions, targets, m
     # Define criteria
     MSE = nn.MSELoss()
     CE = nn.CrossEntropyLoss()  # (weight=model.class_weights)
-    # BCE = nn.BCEWithLogitsLoss(pos_weight=ft([h['conf_bpw']]))
-    BCE = nn.BCEWithLogitsLoss()
+    BCE = nn.BCEWithLogitsLoss(pos_weight=ft([h['conf_bpw']]))
+    # BCE = nn.BCEWithLogitsLoss()
 
     if 'F' in arc:  # add focal loss
         g = h['fl_gamma']
