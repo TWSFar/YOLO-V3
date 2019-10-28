@@ -7,7 +7,8 @@ import torch.optim.lr_scheduler as lr_scheduler
 
 import test  # import test.py to get mAP after each epoch
 from models import *
-from dataloader.dataset import *
+# from dataloader.dataset import *
+from dataloader.dataset_visdrone import *
 from utils.utils import *
 from utils.visualization import create_vis_plot, update_vis_plot
 import multiprocessing
@@ -46,10 +47,13 @@ hyp = {'giou': 1.582,  # giou loss gain
        'shear': 0.5768}  # image shear (+/- deg)
 
 
-classes = ('aeroplane', 'bicycle', 'bird', 'boat', 'bottle', 'bus', 'car',
-           'cat', 'chair', 'cow', 'diningtable', 'dog', 'horse',
-           'motorbike', 'person', 'pottedplant', 'sheep', 'sofa', 'train',
-           'tvmonitor')
+# classes = ('aeroplane', 'bicycle', 'bird', 'boat', 'bottle', 'bus', 'car',
+#            'cat', 'chair', 'cow', 'diningtable', 'dog', 'horse',
+#            'motorbike', 'person', 'pottedplant', 'sheep', 'sofa', 'train',
+#            'tvmonitor')
+
+classes = ('pedestrian', 'people', 'bicycle', 'car', 'van',
+           'truck', 'tricycle', 'awning-tricycle', 'bus', 'motor')
 
 
 def train():
@@ -166,7 +170,7 @@ def train():
                                   batch_size,
                                   hyp=hyp,  # augmentation hyperparameters
                                   classes=classes,
-                                  mode='aug_train')
+                                  mode='train')
 
     # Dataloader
     dataloader = DataLoader(dataset,
@@ -187,7 +191,7 @@ def train():
     results = (0, 0, 0, 0, 0)  # P, R, mAP, F1, test_loss
     t0 = time.time()
     for epoch in range(start_epoch, epochs):  # epoch ------------------------------------------------------------------
-        model.train() # set train
+        model.train()  # set train
         print(('\n' + '%10s' * 10) % ('Epoch', 'gpu_mem', 'lr', 'xy', 'wh', 'obj', 'cls', 'total', 'targets', 'img_size'))
 
         # Freeze backbone at epoch 0, unfreeze at epoch 1 (optional)
@@ -358,7 +362,7 @@ if __name__ == '__main__':
     parser.add_argument('--epochs', type=int, default=200)  # 500200 batches at bs 16, 117263 images = 273 epochs
     parser.add_argument('--batch-size', type=int, default=8)  # effective bs = batch_size * accumulate = 16 * 4 = 64
     parser.add_argument('--accumulate', type=int, default=4, help='batches to accumulate before optimizing')
-    parser.add_argument('--cfg', type=str, default='cfg/yolov3-spp-voc2012.cfg', help='cfg file path')
+    parser.add_argument('--cfg', type=str, default='cfg/yolov3-spp-visdrone.cfg', help='cfg file path')
     parser.add_argument('--data', type=str, default='data/coco.data', help='*.data file path')
     parser.add_argument('--multi-scale', action='store_true', help='adjust (67% - 150%) img_size every 10 batches')
     parser.add_argument('--img-size', type=int, default=416, help='inference size (pixels)')
@@ -378,10 +382,10 @@ if __name__ == '__main__':
     parser.add_argument('--device', default='', help='device id (i.e. 0 or 0,1) or cpu')
     parser.add_argument('--adam', action='store_true', help='use adam optimizer')
     parser.add_argument('--var', type=float, help='debug variable')
-    parser.add_argument('--root_path', type=str, default="/home/twsf/data/VOC2012", help='path of datasets')
+    parser.add_argument('--root_path', type=str, default="/home/twsf/data/visdrone2019", help='path of datasets')
     parser.add_argument('--visdom', default=True, type=bool, help='Use visdom for loss visualization')
     opt = parser.parse_args()
-    opt.weights = best if opt.resume else opt.weights
+    opt.weights = last if opt.resume else opt.weights
     print(opt)
     device = torch_utils.select_device(opt.device, apex=mixed_precision)
 

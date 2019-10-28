@@ -1,27 +1,15 @@
-import os
-import os.path as osp
+import numpy as np
 
+cls = np.array([[0.1, 0.2, 0.3],
+                [0.1, 0.2, 0.4],
+                [0.1, 0.3, 0.9],
+                [0.2, 0.3, 0.1],
+                [0.1, 0.8, 0.5]])
 
-annos = os.listdir("/home/twsf/data/VOC2012/Annotations")
-val = "/home/twsf/data/VOC2012/ImageSets/Main/val.txt"
-vals = []
+scores, classes = cls.max(dim=1)
 
-with open(val, 'r') as f:
-    lines = f.readlines()
-    for line in lines:
-        vals.append(line.strip())
-aug_train = []
+anchor_nms_idx = []
 
-
-for anno in annos:
-    idx = anno.strip()[:-4]
-    if idx not in vals:
-        aug_train.append(idx.strip())
-pass
-
-aug_train_path = "/home/twsf/data/VOC2012/ImageSets/Main/aug_train.txt"
-
-with open(aug_train_path, 'w') as f:
-    for line in aug_train:
-        f.write(line+'\n')
-# for line in range
+for c in classes.unique():
+    idx = np.where(classes == c)[0].tolist()
+    anchor_nms_idx .append(nms(bbox[idx], self.nms_thd))

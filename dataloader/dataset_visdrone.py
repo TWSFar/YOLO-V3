@@ -132,11 +132,18 @@ class LoadImagesAndLabels(Dataset):  # for training
     def __init__(self, root='data', img_size=608, batch_size=8, hyp=None,
                  classes=[], mode='train'):
 
+        if mode in ['train', ]:
+            root_name = "VisDrone2019-DET-train"
+        elif mode in ['val', 'test']:
+            root_name = "VisDrone2019-DET-val"
+        else:
+            raise FileNotFoundError
+
         # load image path
-        self._root = root
+        self._root = os.path.join(root, root_name)
         self._items = self._load_items(mode)
-        self._anno_path = os.path.join(root, 'Annotations', '{}.xml')
-        self._image_path = os.path.join(root, 'JPEGImages', '{}.jpg')
+        self._anno_path = os.path.join(self._root, "annotations", '{}.txt')
+        self._image_path = os.path.join(self._root, "images", '{}.jpg')
         self.img_files = [self._image_path.format(x) for x in self._items]
         self.label_files = [self._anno_path.format(x) for x in self._items]
 
@@ -165,10 +172,8 @@ class LoadImagesAndLabels(Dataset):  # for training
         """Load individual image indices from splits."""
         ids = []
         root = self._root
-        # lf = os.path.join(root, 'ImageSets', 'Main', mode + '.txt')
-        lf = os.path.join(root, 'ImageSets', 'Main', mode + '.txt')
-        with open(lf, 'r') as f:
-            ids += [line.strip() for line in f.readlines()]
+        files = os.listdir(os.path.join(root, 'images'))
+        ids += [line.strip()[:-4] for line in files]
         return ids
 
     def __getitem__(self, index):
@@ -179,7 +184,7 @@ class LoadImagesAndLabels(Dataset):  # for training
         h, w = img.shape[:2]
         hyp = self.hyp
 
-        labels = self._load_pascal_annotation(self.label_files[index], self.index_map)
+        labels = self._load_visdrone_annotation(self.label_files[index])
         try:
             if labels.shape[0]:
                 assert labels.shape[1] == 5, '> 5 label columns: %s' % file
@@ -189,7 +194,7 @@ class LoadImagesAndLabels(Dataset):  # for training
             pass  # print('Warning: missing labels for %s' % self.img_files[i])  # missing label file
         assert len(np.concatenate(labels, 0)) > 0, 'No labels found. Incorrect label paths provided.'
 
-        #print(labels)
+        # print(labels)
         if self.mode in ['train', 'trainval', 'aug_train']:
             # hsv
             img = augment_hsv(img, fraction=0.5)
@@ -207,7 +212,7 @@ class LoadImagesAndLabels(Dataset):  # for training
             # random left-right flip
             img, labels = random_flip(img, labels, 0.5)
             # color distort
-            img = random_color_distort(img)
+            # img = random_color_distort(img)
         elif self.mode in ['test', 'val']:
             # pad and resize
             img, labels = letterbox(img, labels, height=self.img_size, mode=self.mode)
@@ -256,38 +261,19 @@ class LoadImagesAndLabels(Dataset):  # for training
         assert xmin < xmax <= width, "xmax must in (xmin, {}], given {}".format(width, xmax)
         assert ymin < ymax <= height, "ymax must in (ymin, {}], given {}".format(height, ymax)
 
-    def _load_pascal_annotation(self, file, index_map):
-        tree = ET.parse(file)
-        size = tree.find('size')
-        width = float(size.find('width').text)
-        height = float(size.find('height').text)
+    def _load_visdrone_annotation(self, file):
+        with open(file, 'r') as f:
+            data = [x.strip().split(',')[:8] for x in f.readlines()]
+            annos = np.array(data)
+        box_all = []
+        bboxes = annos[annos[:, 4] == '1'][:, :6].astype(np.float64)
+        for bbox in bboxes:
+            bbox[2] += bbox[0]
+            bbox[3] += bbox[1]
+            bbox[5] -= 1
+            box_all.append(bbox[[5, 0, 1, 2, 3]].tolist())  # (label,x1,y1,x2,y2)
 
-        objs = tree.findall('object')
-        num_objs = len(objs)
-        boxes = np.zeros((num_objs, 5), dtype=np.float32)
-
-        # Load object bounding boxes into a data frame.
-        for ix, obj in enumerate(objs):
-            cls = obj.find('name').text
-            try:
-                boxes[ix, 0] = index_map[cls]
-            except:
-                continue
-            bbox = obj.find('bndbox')
-            # Make pixel indexes 0-based
-            x1 = float(bbox.find('xmin').text)
-            y1 = float(bbox.find('ymin').text)
-            x2 = float(bbox.find('xmax').text)
-            y2 = float(bbox.find('ymax').text)
-
-            try:
-                self.validate_label(x1, y1, x2, y2, width, height)
-            except AssertionError as e:
-                raise RuntimeError("Invalid label at {}, {}".format(anno_path, e))
-
-            boxes[ix, 1:] = [x1, y1, x2, y2]
-
-        return boxes
+        return np.array(box_all)
 
 
 def convert_tif2bmp(p='../xview/val_images_bmp'):

@@ -4,7 +4,8 @@ import json
 from torch.utils.data import DataLoader
 
 from models import *
-from dataloader.dataset import *
+# from dataloader.dataset import *
+from dataloader.dataset_visdrone import *
 from utils.utils import *
 
 
@@ -46,7 +47,7 @@ def test(cfg,
     # dataset = VOCDetection(opt, test_path, classes, img_size, batch_size)
     dataset = LoadImagesAndLabels(
                         root=root_path,
-                        mode="val",
+                        mode="test",
                         img_size=img_size,
                         batch_size=batch_size,
                         classes=classes)
