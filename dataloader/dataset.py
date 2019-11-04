@@ -207,7 +207,7 @@ class LoadImagesAndLabels(Dataset):  # for training
             # random left-right flip
             img, labels = random_flip(img, labels, 0.5)
             # color distort
-            img = random_color_distort(img)
+            # img = random_color_distort(img)
         elif self.mode in ['test', 'val']:
             # pad and resize
             img, labels = letterbox(img, labels, height=self.img_size, mode=self.mode)
