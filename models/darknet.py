@@ -238,6 +238,7 @@ def create_grids(self, img_size=416, ng=(13, 13), device='cpu', type=torch.float
     self.nx = nx
     self.ny = ny
 
+
 def load_darknet_weights(self, weights, cutoff=-1):
     # Parses and loads the weights stored in 'weights'
     # cutoff: save layers between 0 and cutoff (if cutoff = -1 all are saved)

@@ -30,25 +30,23 @@ def augment_hsv(img, fraction):
     return img
 
 
-def letterbox(img, labels, height=416, mode='train', color=(127.5, 127.5, 127.5)):
+def letterbox(img, labels, height=416, train=False, color=(127.5, 127.5, 127.5)):
     """
     resize a rectangular image to a padded square
     """
     shape = img.shape[:2]  # shape = [height, width]
     ratio = float(height) / max(shape)  # ratio  = old / new
-    if mode == 'test' or mode == 'val':
+    if not train:
         dw = (max(shape) - shape[1]) / 2  # width padding
         dh = (max(shape) - shape[0]) / 2  # height padding
         left, right = round(dw - 0.1), round(dw + 0.1)
         top, bottom = round(dh - 0.1), round(dh + 0.1)
-    elif mode in ["train", "trainval", "aug_train"]:
+    else:
         dw = random.randint(0, max(shape) - shape[1])
         dh = random.randint(0, max(shape) - shape[0])
         left, right = dw, max(shape) - shape[1] - dw
         top, bottom = dh, max(shape) - shape[0] - dh
-    else:
-        print("mode {} is not find".format(mode))
-        raise NotImplementedError
+
     img = cv2.copyMakeBorder(img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color)  # padded square
     interp = np.random.randint(0, 5)
     img = cv2.resize(img, (height, height), interpolation=interp)  # resized, no border

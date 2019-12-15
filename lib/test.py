@@ -5,7 +5,7 @@ from torch.utils.data import DataLoader
 
 from models import *
 # from dataloader.dataset import *
-from dataloader.dataset_visdrone import *
+from dataloader.dataset import *
 from utils.utils import *
 
 

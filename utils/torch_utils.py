@@ -7,34 +7,6 @@ def init_seeds(seed=0):
     torch.cuda.manual_seed_all(seed)
 
 
-def select_device(device=None, apex=False):
-    if device == 'cpu':
-        pass
-    elif device:  # Set environment variable if device is specified
-        os.environ['CUDA_VISIBLE_DEVICES'] = device
-
-    # apex if mixed precision training https://github.com/NVIDIA/apex
-    cuda = False if device == 'cpu' else torch.cuda.is_available()
-    device = torch.device('cuda:0' if cuda else 'cpu')
-
-    if not cuda:
-        print('Using CPU')
-    if cuda:
-        c = 1024 ** 2  # bytes to MB
-        ng = torch.cuda.device_count()
-        x = [torch.cuda.get_device_properties(i) for i in range(ng)]
-        cuda_str = 'Using CUDA ' + ('Apex ' if apex else '')
-        for i in range(0, ng):
-            if i == 1:
-                # torch.cuda.set_device(0)  # OPTIONAL: Set GPU ID
-                cuda_str = ' ' * len(cuda_str)
-            print("%sdevice%g _CudaDeviceProperties(name='%s', total_memory=%dMB)" %
-                  (cuda_str, i, x[i].name, x[i].total_memory / c))
-
-    print('')  # skip a line
-    return device
-
-
 def fuse_conv_and_bn(conv, bn):
     # https://tehnokv.com/posts/fusing-batchnorm-and-conv/
     with torch.no_grad():

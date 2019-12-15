@@ -10,7 +10,7 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 
 from utils.utils import xyxy2xywh
-from .transforms import *
+from dataloaders.transforms import *
 import xml.etree.ElementTree as ET
 
 
